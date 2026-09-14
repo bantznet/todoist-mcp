@@ -49,14 +49,14 @@ jobs:
       # fetch-depth 0 so generate_release_notes can diff against the previous tag.
       - name: Checkout
         if: steps.tag.outputs.tag != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.tag.outputs.tag }}
           fetch-depth: 0
 
       - name: Publish the Release
         if: steps.tag.outputs.tag != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
