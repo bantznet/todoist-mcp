@@ -101,6 +101,34 @@ a `/mcp` request with a hostile `Host` must still answer **401**, not **403**. T
 proxy entrypoint depends on upstream behaviour that a green CI build cannot check
 — see [`docs/MAINTAINER-NOTES.md`](docs/MAINTAINER-NOTES.md).
 
+### Releases vs tags
+
+A **GitHub Release** is notes attached to a tag. It is not what builds the image;
+the **tag push** is. So a Release attached to a tag that already exists fires no
+push event and rebuilds nothing — the image stays as it was.
+
+This bites when a tag was pushed before the change it should contain. The image is
+then stale and no Release will fix it; move the tag:
+
+```bash
+git tag -d v13.2.6
+git push origin :refs/tags/v13.2.6    # delete the remote tag
+git tag v13.2.6                       # re-create it at HEAD
+git push origin v13.2.6               # this is what fires publish.yml
+```
+
+Re-pushing an existing image tag overwrites it in GHCR, so the old image is
+replaced rather than left as a duplicate. Only do this while nothing has been
+deployed from that tag.
+
+Two rules the workflow enforces by pattern, not by validation:
+
+- **The tag must start with `v`** ([`publish.yml`](.github/workflows/publish.yml:8)
+  matches `v*`). A tag named `13.2.6` builds nothing.
+- **The tag must equal `TODOIST_MCP_VERSION` in the Dockerfile.** Tag `v13.2.6`
+  around a `13.2.5` pin publishes an image whose tag misdescribes its contents,
+  which is the one thing the tag is supposed to guarantee.
+
 ---
 
 ## Platforms (amd64 only, for now)
