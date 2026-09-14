@@ -17,6 +17,7 @@ Dockerfile                            # the recipe
 entrypoint.mjs                        # proxy entrypoint (host-check bypass)
 .dockerignore                         # keeps secrets/build noise out of the context
 .github/workflows/publish.yml         # tag -> build (amd64) -> push to GHCR
+.github/workflows/release.yml         # -> GitHub Release (once publish succeeds)
 .github/workflows/upstream-check.yml  # weekly: is the pinned version stale?
 docker-compose.yml                    # runs the published image (tracks :latest)
 .env.example                          # the one variable that is required (NEVER the real key)
@@ -128,6 +129,20 @@ Two rules the workflow enforces by pattern, not by validation:
 - **The tag must equal `TODOIST_MCP_VERSION` in the Dockerfile.** Tag `v13.2.6`
   around a `13.2.5` pin publishes an image whose tag misdescribes its contents,
   which is the one thing the tag is supposed to guarantee.
+
+### Publishing a Release
+
+[`release.yml`](.github/workflows/release.yml) writes the Release, so no `gh`
+install and no token are involved — `GITHUB_TOKEN` is injected into the run.
+
+- **Automatic:** it triggers on `publish` *completing*, so a version tag that
+  builds successfully gets a Release. A failed build gets none, because a Release
+  is a claim that the image exists.
+- **Manual:** Actions → *release* → *Run workflow* with a tag (e.g. `v13.2.5`).
+  This is the path for a tag that predates the workflow, such as the first one.
+
+Notes are generated from the commit history. Edit the Release body afterwards to
+add anything curated — editing a Release creates no tag and triggers no build.
 
 ---
 
