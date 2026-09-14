@@ -1,31 +1,12 @@
 services:
   todoist-mcp:
-    build: .
-    image: todoist-mcp:${TODOIST_MCP_VERSION:-13.2.5}
+    image: ghcr.io/bantznet/todoist-mcp:latest
     container_name: todoist-mcp
     restart: unless-stopped
 
     environment:
-      # Required. Comes from .env; never commit the real key.
-      TODOIST_API_KEY: ${TODOIST_API_KEY:?TODOIST_API_KEY must be set in .env}
-      # Bind all interfaces so the server is reachable outside the container.
-      HOST: 0.0.0.0
-      PORT: "3000"
-      # DNS-rebinding guard. Add every hostname clients use, or /mcp returns 403.
-      # Matching is hostname-only; the port is ignored.
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-todoist-mcp,todoist-mcp:3000,localhost,localhost:3000,127.0.0.1:3000}
+      # Required. Comes from .env
+      TODOIST_API_KEY: ${TODOIST_API_KEY}
 
     ports:
-      # Loopback by default (for local clients and testing). Containers on the
-      # same network reach the service by name without a published port.
-      # Set BIND_ADDR=0.0.0.0 to expose it more widely.
-      - "${BIND_ADDR:-127.0.0.1}:${HOST_PORT:-3000}:3000"
-
-    # To join a pre-existing network instead of the project default, uncomment
-    # the networks blocks and point `name` at that network.
-    # networks:
-    #   - mcp
-
-# networks:
-#   mcp:
-#     external: true
+      - "3000:3000"

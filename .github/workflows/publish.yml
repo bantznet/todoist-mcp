@@ -39,9 +39,9 @@ jobs:
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
       # No QEMU. This image is built for linux/amd64 only, natively on the
-      # runner. Do NOT reintroduce QEMU to add arm64: Node 22's npm crashes with
+      # runner. Do NOT reintroduce QEMU to add arm64: Node's npm crashes with
       # SIGILL (exit code 132) under arm64 emulation, failing the build at
-      # `npm install`. See "Multi-arch" in PUBLISHING.md for the native-runner
+      # `npm install`. See "Platforms" in PUBLISHING.md for the native-runner
       # upgrade path.
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3

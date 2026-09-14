@@ -7,21 +7,22 @@ Streamable HTTP.**
 Upstream ships to npm only — there is no official image. This packages that
 release as a small, non-root container any MCP client that speaks Streamable HTTP
 can connect to. It is deliberately generic: no orchestrator, network or
-tool-policy assumptions. It exposes the full upstream server (read **and** write
-tools); deciding what a client should use is the client's job.
+tool-policy assumptions, and no host allowlist to maintain. It exposes the full
+upstream server (read **and** write tools); deciding what a client should use is
+the client's job.
 
 | | |
 |---|---|
-| **Image** | `ghcr.io/<your-account>/todoist-mcp:<upstream-version>` |
+| **Image** | `ghcr.io/bantznet/todoist-mcp:<upstream-version>` |
 | **Upstream** | [`Doist/todoist-mcp`](https://github.com/Doist/todoist-mcp) |
 | **Transport** | Streamable HTTP — `/mcp` (probe at `/health`) |
 | **Platforms** | `linux/amd64` (arm64 needs a native ARM runner — see [PUBLISHING.md](PUBLISHING.md)) |
 | **Base** | `node:24-alpine`, runs as non-root `node` |
 
 **Jump to:** [Quick start](#quick-start) · [Configuration](#configuration) ·
-[Endpoints](#endpoints) · [Access control](#access-control) ·
-[Connecting a client](#connecting-a-client) · [Security](#security-notes) ·
-[Troubleshooting](#troubleshooting)
+[Host checking](#host-checking) · [Endpoints](#endpoints) ·
+[Access control](#access-control) · [Connecting a client](#connecting-a-client) ·
+[Security](#security-notes) · [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -32,25 +33,37 @@ treat it like a password.
 
 **Docker Compose**
 
+[`docker-compose.yml`](docker-compose.yml) runs the published image, so there is
+nothing to build:
+
 ```bash
 cp .env.example .env          # paste your API key into .env
-docker compose up -d --build
+docker compose up -d
 docker compose logs -f todoist-mcp
 ```
+
+`docker compose up` pulls from GHCR. If the package is private, log in on the
+host first:
+
+```bash
+echo <PAT-with-read:packages> | docker login ghcr.io -u bantznet --password-stdin
+```
+
+The compose file tracks `:latest`, so a pull always gets the newest release. Pin a
+version tag (`ghcr.io/bantznet/todoist-mcp:13.2.5`) instead if you need to know
+exactly what you are running, or to roll back.
 
 **docker run**
 
 ```bash
 docker run -d --name todoist-mcp \
   -e TODOIST_API_KEY=<your-api-key> \
-  -e HOST=0.0.0.0 \
-  -e ALLOWED_HOSTS=localhost,127.0.0.1 \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/<your-account>/todoist-mcp:<upstream-version>
+  ghcr.io/bantznet/todoist-mcp:<upstream-version>
 ```
 
-`ALLOWED_HOSTS` must list every hostname clients use, or `/mcp` returns 403 (the
-compose file supplies a default). To build the image yourself, see
+Any hostname works — there is no allowlist to configure (see
+[Host checking](#host-checking)). To build the image yourself, see
 [PUBLISHING.md](PUBLISHING.md).
 
 Confirm it is up:
@@ -69,22 +82,36 @@ into the image.
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `TODOIST_API_KEY` | **Yes** | — | Authenticates to Todoist. The name is `_KEY`, not `_TOKEN`; the server exits if it is unset. |
-| `HOST` | No | `0.0.0.0` | Bind address. Upstream defaults to `127.0.0.1`, which is unreachable outside the container. |
-| `PORT` | No | `3000` | Listen port. |
-| `ALLOWED_HOSTS` | No | see below | Allowlist of `Host` header hostnames. |
+| `HOST` | No | `0.0.0.0` | Public bind address. |
+| `PORT` | No | `3000` | Public listen port. The server itself runs on `PORT+1`, inside the container. |
 | `TODOIST_BASE_URL` | No | upstream default | Overrides the Todoist API base URL. Rarely needed. |
 
-The compose default for `ALLOWED_HOSTS`:
+Upstream also reads `TZ`, `USE_STRUCTURED_CONTENT` and `MCP_TOKEN_BUDGET`; they
+pass through untouched. Upstream's `ALLOWED_HOSTS` is **not used by this image** —
+see below.
 
-```
-todoist-mcp,todoist-mcp:3000,localhost,localhost:3000,127.0.0.1:3000
-```
+The shipped [`docker-compose.yml`](docker-compose.yml) sets `TODOIST_API_KEY` and
+nothing else — `HOST` and `PORT` fall back to the defaults above. Its single
+`ports:` line is the one thing worth editing: it decides who can reach the server.
 
-The server checks the incoming `Host` header against this list as a DNS-rebinding
-guard and returns **403 on `/mcp`** on a mismatch. Matching is on the **hostname
-only** — the port is stripped from both the list and the request, so
-`todoist-mcp` and `todoist-mcp:3000` are equivalent. Override it for your
-environment.
+---
+
+## Host checking
+
+Upstream validates the `Host` (and `Origin`) header on `/mcp` against a trusted
+allowlist, as DNS-rebinding protection, and answers **403** on a mismatch. It has
+no wildcard and no off switch, so with `HOST=0.0.0.0` every client hostname must
+be listed explicitly.
+
+This image removes that friction deliberately. [`entrypoint.mjs`](entrypoint.mjs)
+runs the server on `127.0.0.1:PORT+1` with an empty host allowlist (loopback
+requests are never rejected) and serves the public port through a small proxy
+that rewrites `Host` to `localhost` and drops `Origin`. The effect: **any hostname
+or address a client uses works**, with no `ALLOWED_HOSTS` to maintain. Setting
+`ALLOWED_HOSTS` has no effect.
+
+The trade-off is real: **DNS-rebinding protection is effectively disabled.**
+Exposure control is yours — see [Security notes](#security-notes).
 
 ---
 
@@ -92,11 +119,8 @@ environment.
 
 | Path | Method | Notes |
 |---|---|---|
-| `/mcp` | Streamable HTTP | The MCP endpoint. Requires a `Host` in `ALLOWED_HOSTS`. |
-| `/health` | GET | Liveness probe. No `Host` check, so it works even when `ALLOWED_HOSTS` is wrong. |
-
-A 200 on `/health` with a 403 on `/mcp` is the signature of an `ALLOWED_HOSTS`
-mismatch.
+| `/mcp` | Streamable HTTP | The MCP endpoint. |
+| `/health` | GET | Liveness probe. |
 
 ---
 
@@ -119,23 +143,30 @@ Any MCP client that supports Streamable HTTP works.
 - **URL:** `http://<host>:3000/mcp`
 - **Auth header:** none. The server authenticates *to* Todoist; it does not
   authenticate inbound requests. Do not send an empty bearer token.
-- **Host header:** must be listed in `ALLOWED_HOSTS`.
+- **Host header:** anything. The proxy rewrites it.
 
 From another container, use the service name (e.g. `http://todoist-mcp:3000/mcp`)
-and add that hostname to `ALLOWED_HOSTS`.
+— both containers simply need to share a network.
 
 ---
 
 ## Security notes
 
+- **The shipped compose publishes on every interface.** The `"3000:3000"` line in
+  [`docker-compose.yml`](docker-compose.yml) binds `0.0.0.0`, so anyone who can
+  reach the host's port 3000 reaches the server. Use `"127.0.0.1:3000:3000"` unless
+  you intend remote access.
+- **There is no inbound authentication.** Anyone who can reach `/mcp` gets the
+  full tool surface, running with your Todoist account.
+- **Host checking is disabled by design.** Upstream's DNS-rebinding guard is
+  bypassed by the proxy in [`entrypoint.mjs`](entrypoint.mjs), so any hostname
+  reaches the server. Put real authentication in front of it if the port is
+  reachable from an untrusted network.
 - **Non-root.** Runs as the `node` user (uid 1000).
 - **Secrets stay at runtime.** The API key is an environment variable, never a
   build argument or a layer.
 - **Pinned upstream version.** An image tag tells you exactly what is inside and
   lets you roll back.
-- **`ALLOWED_HOSTS` is not authentication.** It is a DNS-rebinding guard. If the
-  port is reachable from an untrusted network, put a reverse proxy with real
-  authentication in front.
 
 ---
 
@@ -143,11 +174,11 @@ and add that hostname to `ALLOWED_HOSTS`.
 
 | Symptom | Likely cause |
 |---|---|
-| `/health` 200 but `/mcp` **403** | `ALLOWED_HOSTS` lacks the hostname your client sends. Add it (the port is ignored). |
-| Connection refused from another container | `HOST` left at `127.0.0.1`, or no shared network. |
+| `docker compose up` cannot find the image | The package is private (log in to GHCR) or that version was never published. |
+| Container starts, then exits or restart-loops | `TODOIST_API_KEY` is empty. The log line is `TODOIST_API_KEY environment variable is required`. |
+| Connection refused from another container | The containers are not on a shared network, or the port is not published. |
 | 401 from Todoist | Wrong key, or the variable is named `TODOIST_API_TOKEN` instead of `TODOIST_API_KEY`. |
 | Client connects but sees no tools | MCP handshake failed — check the container logs for an auth error at startup. |
-| Works locally, fails from a gateway | Override `ALLOWED_HOSTS` (and `BIND_ADDR`) for the hostname the gateway uses. |
 
 ---
 

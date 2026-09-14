@@ -14,11 +14,12 @@ the built-in `GITHUB_TOKEN`, so you never create or store a credential.
 
 ```
 Dockerfile                            # the recipe
+entrypoint.mjs                        # proxy entrypoint (host-check bypass)
 .dockerignore                         # keeps secrets/build noise out of the context
 .github/workflows/publish.yml         # tag -> build (amd64) -> push to GHCR
 .github/workflows/upstream-check.yml  # weekly: is the pinned version stale?
-docker-compose.yml                    # how a host runs the image
-.env.example                          # API key placeholder (NEVER the real key)
+docker-compose.yml                    # runs the published image (tracks :latest)
+.env.example                          # the one variable that is required (NEVER the real key)
 README.md                             # configuration, endpoints, access control
 PUBLISHING.md                         # this file
 LICENSE                               # MIT
@@ -66,6 +67,9 @@ repository.
 
 ## Releasing
 
+An upstream bump is two edits to the repo — the pin and the tag — plus a pull on
+the host to actually run it.
+
 ```bash
 # 1. bump TODOIST_MCP_VERSION in the Dockerfile, then:
 git commit -am "Bump todoist-mcp to 13.2.6"
@@ -74,15 +78,28 @@ git push
 # 2. tag and push — THIS triggers the build
 git tag v13.2.6
 git push origin v13.2.6
+
+# 3. to run that release (the compose file tracks :latest, so no edit is needed):
+docker compose pull
+docker compose up -d
 ```
 
-The tag `v13.2.6` becomes image tag `13.2.6`, and `latest` is published too.
-**Never deploy `latest`** — you lose the ability to know what you are running or
-to roll back. (A `workflow_dispatch` run publishes the version tag but not
-`latest`; only a tag push does.)
+The tag `v13.2.6` becomes image tag `13.2.6` — the bare upstream version, no `v`.
+`latest` is published too. (A `workflow_dispatch` run publishes the version tag
+but not `latest`; only a tag push does.)
+
+Be deliberate about `latest`: it is a moving tag that always points at the newest
+release, and the committed compose file tracks it, so a `pull` is all it takes to
+upgrade — and all it takes to lose track of what you are running. Pin the version
+tag in the compose file when you need a fixed answer or a rollback.
 
 Triggering on tag pushes makes a release a git object: auditable, revertable, and
 impossible to produce by accident from a half-finished tree.
+
+After a bump, re-run the check in [Verifying what you published](#verifying-what-you-published):
+a `/mcp` request with a hostile `Host` must still answer **401**, not **403**. The
+proxy entrypoint depends on upstream behaviour that a green CI build cannot check
+— see [`docs/MAINTAINER-NOTES.md`](docs/MAINTAINER-NOTES.md).
 
 ---
 
@@ -130,21 +147,42 @@ docker run --rm -e TODOIST_API_KEY=<key> -p 3000:3000 \
 curl -s localhost:3000/health
 ```
 
+Then confirm the proxy entrypoint is in place: a `/mcp` request carrying
+`Host: evil.example.com` should answer **401** (Todoist auth) — **403** means
+upstream's host check is still rejecting, i.e. the proxy is not running:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'Host: evil.example.com' -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  localhost:3000/mcp
+```
+
 Also worth doing once: `docker scout quickview` (or `trivy image`) on the
-published tag.
+published tag. The full verification log is in
+[docs/MAINTAINER-NOTES.md](docs/MAINTAINER-NOTES.md).
 
 ---
 
 ## Deploying it
 
-Swap `build: .` in [`docker-compose.yml`](docker-compose.yml) for the published
-image:
+[`docker-compose.yml`](docker-compose.yml) already runs the published image —
+there is no `build:` to swap out. Deploying is a pull:
 
-```yaml
-services:
-  todoist-mcp:
-    image: ghcr.io/<your-account>/todoist-mcp:13.2.6   # pinned, not :latest
+```bash
+docker compose pull
+docker compose up -d
 ```
+
+The committed file tracks `:latest`, so this always moves you to the newest
+release with no edit; the cost is that the file no longer tells you what you are
+running. Pin a version tag (`ghcr.io/<your-account>/todoist-mcp:13.2.6`) when you
+want that. The file names this repository's registry, so a fork must change that
+one line.
+
+Until the first publish has completed there is nothing to pull — build locally
+for that window (see [Fallback: build locally](#fallback-build-locally)).
 
 If the package is private, log in once on the host:
 

@@ -19,6 +19,11 @@ image served over Streamable HTTP.
   [`.github/workflows/publish.yml`](.github/workflows/publish.yml): Node's `npm`
   crashes with SIGILL (exit code 132) under arm64 emulation. arm64 needs a
   native ARM runner.
+- **The host-check bypass is intentional.** [`entrypoint.mjs`](entrypoint.mjs)
+  fronts the server with a proxy that rewrites `Host`/`Origin`, so upstream's
+  DNS-rebinding guard never fires and any client hostname works. Do not "fix"
+  this by re-enabling the guard, and keep the trade-off disclosed in
+  [`README.md`](README.md).
 - **Keep the image and its user-facing docs environment-agnostic.** No
   orchestrator, network or personal-environment assumptions in
   [`Dockerfile`](Dockerfile), [`README.md`](README.md) or
