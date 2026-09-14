@@ -1,0 +1,75 @@
+name: publish
+
+# Trigger on version tags (v13.2.6 -> image tag 13.2.6), or manually for a
+# dry run that builds and pushes without creating a tag.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream @doist/todoist-mcp version to build (no tag is created)"
+        required: true
+        default: "13.2.5"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve upstream version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ github.event.inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      # No QEMU. This image is built for linux/amd64 only, natively on the
+      # runner. Do NOT reintroduce QEMU to add arm64: Node 22's npm crashes with
+      # SIGILL (exit code 132) under arm64 emulation, failing the build at
+      # `npm install`. See "Multi-arch" in PUBLISHING.md for the native-runner
+      # upgrade path.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.value }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            TODOIST_MCP_VERSION=${{ steps.version.outputs.value }}
+            IMAGE_SOURCE=https://github.com/${{ github.repository }}

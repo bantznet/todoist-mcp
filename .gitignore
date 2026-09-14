@@ -1,0 +1,11 @@
+# Secrets — never commit a real API key.
+.env
+.env.*
+
+# Exceptions: the template is safe to commit.
+!.env.example
+
+# Local noise.
+*.log
+node_modules/
+.DS_Store

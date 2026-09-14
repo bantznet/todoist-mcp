@@ -1,0 +1,73 @@
+name: upstream check
+
+# Weekly check: is the pinned @doist/todoist-mcp version stale?
+on:
+  schedule:
+    # Mondays at 13:00 UTC.
+    - cron: "0 13 * * 1"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read pinned version from the Dockerfile
+        id: pinned
+        run: |
+          version=$(grep -oP 'TODOIST_MCP_VERSION=\K[0-9][0-9.]*' Dockerfile | head -n1)
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Read latest version from npm
+        id: latest
+        run: |
+          version=$(npm view @doist/todoist-mcp version)
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Open an issue when the pinned version is stale
+        if: steps.pinned.outputs.value != steps.latest.outputs.value
+        uses: actions/github-script@v7
+        env:
+          PINNED: ${{ steps.pinned.outputs.value }}
+          LATEST: ${{ steps.latest.outputs.value }}
+        with:
+          script: |
+            const pinned = process.env.PINNED;
+            const latest = process.env.LATEST;
+            const title = `Upstream @doist/todoist-mcp ${latest} is available`;
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+            });
+            if (issues.some((i) => i.title === title)) {
+              core.info(`Issue already open: ${title}`);
+              return;
+            }
+
+            const body = [
+              `Pinned version is **${pinned}**; npm has **${latest}**.`,
+              "",
+              "To release:",
+              "",
+              `1. Bump \`TODOIST_MCP_VERSION\` in the Dockerfile to \`${latest}\`.`,
+              "2. Commit and push.",
+              `3. Tag \`v${latest}\` and push the tag.`,
+              "",
+              "If you maintain any tool allowlist downstream (for example a",
+              "read-only subset), re-check tool names against the new release.",
+            ].join("\n");
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+            });

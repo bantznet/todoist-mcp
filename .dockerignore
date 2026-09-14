@@ -1,0 +1,21 @@
+# Keep secrets and local noise out of the build context.
+#
+# The build only needs the Dockerfile itself, so almost everything else is
+# excluded. In particular, .env must never enter the context.
+
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.github
+
+node_modules
+
+Dockerfile
+docker-compose*.yml
+*.md
+LICENSE
+
+*.log
